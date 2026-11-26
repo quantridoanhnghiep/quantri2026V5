@@ -477,6 +477,16 @@
                             <input type="text" id="custAddress" class="form-control" placeholder="Địa chỉ giao hàng" oninput="updateInvoicePreview()">
                         </div>
                     </div>
+
+                    <div style="margin-top: 10px; display:flex; gap:8px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label class="form-label">🏦 Mã QR Ngân Hàng hiển thị trên PXK (Tùy chọn):</label>
+                            <select id="orderQrAccount" class="form-control" onchange="updateInvoicePreview()">
+                                <option value="">-- Không hiển thị mã QR trên PXK --</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-outline btn-sm" style="height:33px;" onclick="openVietQRModal()" title="Thêm hoặc quản lý danh sách STK ngân hàng">➕ Thêm STK</button>
+                    </div>
                 </div>
 
                 <div class="card">
@@ -1160,41 +1170,42 @@
     </div>
 </div>
 
-<!-- Modal Cấu Hình VietQR -->
+<!-- Modal Quản Lý Danh Sách Tài Khoản Ngân Hàng VietQR -->
 <div id="vietQRModal" class="modal">
-    <div class="modal-content" style="width: 520px;">
+    <div class="modal-content" style="width: 660px;">
         <span class="close" onclick="closeModal('vietQRModal')">&times;</span>
-        <h2 style="margin-top:0; color: var(--primary-color); border-bottom: 2px solid #eee; padding-bottom: 10px;">🏦 Cấu Hình Mã VietQR Trên Phiếu Xuất Kho</h2>
-        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
-            <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer;">
-                <input type="checkbox" id="qrEnabled"> Hiển thị mã QR chuyển khoản động trên Phiếu Xuất Kho
-            </label>
-            <div>
-                <label class="form-label">Ngân hàng:</label>
-                <select id="qrBankBin" class="form-control">
-                    <option value="970436">Vietcombank (VCB)</option>
-                    <option value="970415">VietinBank (CTG)</option>
-                    <option value="970418">BIDV</option>
-                    <option value="970405">Agribank</option>
-                    <option value="970407">Techcombank (TCB)</option>
-                    <option value="970422">MB Bank (MB)</option>
-                    <option value="970416">ACB</option>
-                    <option value="970432">VPBank</option>
-                    <option value="970423">TPBank</option>
-                    <option value="970403">Sacombank</option>
-                    <option value="970441">VIB</option>
-                    <option value="970437">HDBank</option>
-                </select>
+        <h2 style="margin-top:0; color: var(--primary-color); border-bottom: 2px solid #eee; padding-bottom: 10px;">🏦 Quản Lý Tài Khoản Ngân Hàng VietQR</h2>
+        <p style="font-size:12.5px; color:var(--text-muted); margin-top:-4px;">
+            Thêm nhiều tài khoản ngân hàng (OCB, VCB, MB, Techcombank...). Khi lên đơn hàng, bạn có thể chọn hiển thị mã QR của ngân hàng bất kỳ cho từng khách, hoặc để trống nếu không cần in QR.
+        </p>
+
+        <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:6px; padding:12px; margin-bottom:14px;">
+            <div style="font-weight:700; color:var(--primary-color); margin-bottom:8px;">➕ Thêm Tài Khoản Ngân Hàng Mới</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <div style="grid-column: span 2;">
+                    <label class="form-label">Ngân hàng (Hỗ trợ 45+ ngân hàng & ví Việt Nam):</label>
+                    <select id="qrBankBin" class="form-control"></select>
+                </div>
+                <div>
+                    <label class="form-label">Số tài khoản (*):</label>
+                    <input type="text" id="qrAccountNo" class="form-control" placeholder="VD: 0123456789">
+                </div>
+                <div>
+                    <label class="form-label">Tên chủ tài khoản (Không dấu):</label>
+                    <input type="text" id="qrAccountName" class="form-control" placeholder="VD: NGUYEN VAN A">
+                </div>
             </div>
-            <div>
-                <label class="form-label">Số tài khoản:</label>
-                <input type="text" id="qrAccountNo" class="form-control" placeholder="VD: 0123456789">
-            </div>
-            <div>
-                <label class="form-label">Tên chủ tài khoản (Không dấu):</label>
-                <input type="text" id="qrAccountName" class="form-control" placeholder="VD: NGUYEN VAN A">
-            </div>
-            <button class="btn btn-primary" style="margin-top:6px; padding:10px;" onclick="saveVietQRConfig()">💾 Lưu Cấu Hình VietQR</button>
+            <button type="button" class="btn btn-primary" style="margin-top:10px; width:100%; padding:9px;" onclick="addVietQRAccount()">💾 Lưu Tài Khoản Ngân Hàng Này</button>
+        </div>
+
+        <div style="font-weight:700; color:var(--text-main); margin-bottom:6px;">📋 Danh Sách Tài Khoản Đã Lưu (<span id="qrAccountCount">0</span>)</div>
+        <div class="table-wrap" style="max-height:240px; overflow-y:auto;">
+            <table id="qrAccountsTable" style="font-size:12.5px;">
+                <thead>
+                    <tr><th>Ngân hàng</th><th>Số tài khoản</th><th>Chủ tài khoản</th><th class="text-center" style="width:70px;">Xóa</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -1284,6 +1295,7 @@
 
     let editingOrderId = null;
     let currentDraftOrderId = null;
+    let currentDraftQrMemo = null;
     let currentReportPeriod = 'today';
     let currentFilteredReportOrders = [];
     let currentViewedStaff = null;
@@ -1337,6 +1349,7 @@
 
     const invalidateCache = () => {
         Object.keys(DB_CACHE).forEach(k => delete DB_CACHE[k]);
+        VIETQR_ACCOUNTS_CACHE = null;
     };
 
     // =========================================================================
@@ -1520,6 +1533,41 @@
         return `PXK${month}${year}${randomChar}${randomNum}`;
     };
 
+    // Tạo lời nhắn chuyển khoản VietQR 11 ký tự: xen kẽ A-Z với tháng MM và ngày DD (VD ngày 26/11 -> 1ABC1L2C6DF)
+    const generateQrTransferMemo = (dateStr = '') => {
+        let mm = '', dd = '';
+        const m = String(dateStr || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) {
+            mm = m[2];
+            dd = m[3];
+        } else {
+            const d = new Date();
+            mm = String(d.getMonth() + 1).padStart(2, '0');
+            dd = String(d.getDate()).padStart(2, '0');
+        }
+        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        const r = () => letters[Math.floor(Math.random() * letters.length)];
+        return `${mm[0]}${r()}${r()}${r()}${mm[1]}${r()}${dd[0]}${r()}${dd[1]}${r()}${r()}`;
+    };
+
+    const syncDraftQrMemoWithDate = (dateStr) => {
+        if (!currentDraftQrMemo || currentDraftQrMemo.length !== 11) {
+            currentDraftQrMemo = generateQrTransferMemo(dateStr);
+            return currentDraftQrMemo;
+        }
+        const m = String(dateStr || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!m) return currentDraftQrMemo;
+        const mm = m[2], dd = m[3];
+        // Nếu ngày/tháng thay đổi, cập nhật đúng 4 vị trí chữ số MM/DD mà vẫn giữ nguyên các chữ cái random
+        const arr = currentDraftQrMemo.split('');
+        arr[0] = mm[0];
+        arr[4] = mm[1];
+        arr[6] = dd[0];
+        arr[8] = dd[1];
+        currentDraftQrMemo = arr.join('');
+        return currentDraftQrMemo;
+    };
+
     const renderPagination = (containerId, totalItems, currentPage, onPageChangeFnName) => {
         const el = document.getElementById(containerId);
         if (!el) return;
@@ -1541,42 +1589,173 @@
     };
 
     // =========================================================================
-    // 3. VIETQR CONFIGURATION
+    // 3. VIETQR MULTI-BANK ACCOUNTS (45+ NGÂN HÀNG VIỆT NAM)
     // =========================================================================
-    const getVietQRConfig = () => {
+    const VN_BANKS = [
+        { bin: '970436', short: 'Vietcombank', name: 'Vietcombank (VCB) - TMCP Ngoại Thương' },
+        { bin: '970448', short: 'OCB', name: 'OCB - TMCP Phương Đông' },
+        { bin: '970415', short: 'VietinBank', name: 'VietinBank (CTG) - TMCP Công Thương' },
+        { bin: '970418', short: 'BIDV', name: 'BIDV - TMCP Đầu Tư và Phát Triển' },
+        { bin: '970405', short: 'Agribank', name: 'Agribank - Nông Nghiệp & PTNT' },
+        { bin: '970407', short: 'Techcombank', name: 'Techcombank (TCB) - TMCP Kỹ Thương' },
+        { bin: '970422', short: 'MBBank', name: 'MB Bank (MB) - TMCP Quân Đội' },
+        { bin: '970416', short: 'ACB', name: 'ACB - TMCP Á Châu' },
+        { bin: '970432', short: 'VPBank', name: 'VPBank - TMCP Việt Nam Thịnh Vượng' },
+        { bin: '970423', short: 'TPBank', name: 'TPBank - TMCP Tiên Phong' },
+        { bin: '970403', short: 'Sacombank', name: 'Sacombank (STB) - TMCP Sài Gòn Thương Tín' },
+        { bin: '970441', short: 'VIB', name: 'VIB - TMCP Quốc Tế Việt Nam' },
+        { bin: '970437', short: 'HDBank', name: 'HDBank - TMCP Phát Triển TP.HCM' },
+        { bin: '970443', short: 'SHB', name: 'SHB - TMCP Sài Gòn - Hà Nội' },
+        { bin: '970431', short: 'Eximbank', name: 'Eximbank (EIB) - TMCP Xuất Nhập Khẩu' },
+        { bin: '970426', short: 'MSB', name: 'MSB - TMCP Hàng Hải Việt Nam' },
+        { bin: '970440', short: 'SeABank', name: 'SeABank - TMCP Đông Nam Á' },
+        { bin: '970449', short: 'LPBank', name: 'LPBank - TMCP Lộc Phát Việt Nam (Liên Việt)' },
+        { bin: '970428', short: 'NamABank', name: 'Nam A Bank - TMCP Nam Á' },
+        { bin: '970409', short: 'BacABank', name: 'Bac A Bank - TMCP Bắc Á' },
+        { bin: '970454', short: 'BVBank', name: 'BVBank (VietCapital) - TMCP Bản Việt' },
+        { bin: '970425', short: 'ABBank', name: 'ABBank - TMCP An Bình' },
+        { bin: '970412', short: 'PVcomBank', name: 'PVcomBank - TMCP Đại Chúng Việt Nam' },
+        { bin: '970438', short: 'BaoVietBank', name: 'BaoViet Bank - TMCP Bảo Việt' },
+        { bin: '970427', short: 'VietABank', name: 'VietABank - TMCP Việt Á' },
+        { bin: '970452', short: 'KienlongBank', name: 'KienlongBank - TMCP Kiên Long' },
+        { bin: '970419', short: 'NCB', name: 'NCB - TMCP Quốc Dân' },
+        { bin: '970414', short: 'MBV/OceanBank', name: 'OceanBank / MBV - TMCP Đại Dương' },
+        { bin: '970433', short: 'VietBank', name: 'VietBank - TMCP Việt Nam Thương Tín' },
+        { bin: '970430', short: 'PGBank', name: 'PGBank - TMCP Thịnh Vượng & Phát Triển' },
+        { bin: '970400', short: 'SaigonBank', name: 'SaigonBank - TMCP Sài Gòn Công Thương' },
+        { bin: '970429', short: 'SCB', name: 'SCB - TMCP Sài Gòn' },
+        { bin: '970406', short: 'DongABank', name: 'DongA Bank / Vikki - TMCP Đông Á' },
+        { bin: '970408', short: 'GPBank', name: 'GPBank - Dầu Khí Toàn Cầu' },
+        { bin: '970444', short: 'CBBank', name: 'CBBank / VCBNeo - Xây Dựng Việt Nam' },
+        { bin: '970424', short: 'ShinhanBank', name: 'Shinhan Bank Việt Nam' },
+        { bin: '970457', short: 'WooriBank', name: 'Woori Bank Việt Nam' },
+        { bin: '458761', short: 'HSBC', name: 'HSBC Việt Nam' },
+        { bin: '970410', short: 'StandardChartered', name: 'Standard Chartered Việt Nam' },
+        { bin: '970458', short: 'UOB', name: 'UOB Việt Nam' },
+        { bin: '970439', short: 'PublicBank', name: 'Public Bank Việt Nam' },
+        { bin: '422589', short: 'CIMB', name: 'CIMB Việt Nam' },
+        { bin: '970434', short: 'IndovinaBank', name: 'Indovina Bank (IVB)' },
+        { bin: '546034', short: 'CAKE', name: 'CAKE by VPBank' },
+        { bin: '546035', short: 'Ubank', name: 'Ubank by VPBank' },
+        { bin: '963388', short: 'Timo', name: 'Timo Digital Bank' },
+        { bin: '971005', short: 'ViettelMoney', name: 'Viettel Money' },
+        { bin: '971011', short: 'VNPTMoney', name: 'VNPT Money' }
+    ];
+
+    const getBankShortName = (bin) => {
+        const b = VN_BANKS.find(x => x.bin === String(bin));
+        return b ? b.short : String(bin);
+    };
+
+    let VIETQR_ACCOUNTS_CACHE = null;
+
+    const getVietQRAccounts = () => {
+        if (VIETQR_ACCOUNTS_CACHE !== null) return VIETQR_ACCOUNTS_CACHE;
         try {
-            const raw = safeGetStorage('vietqr_config');
-            return raw ? JSON.parse(raw) : { enabled: false, bankBin: '970436', accountNo: '', accountName: '' };
-        } catch {
-            return { enabled: false, bankBin: '970436', accountNo: '', accountName: '' };
-        }
+            const raw = safeGetStorage('vietqr_accounts');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) { VIETQR_ACCOUNTS_CACHE = parsed; return parsed; }
+            }
+            // Tự động chuyển đổi từ cấu hình đơn cũ (vietqr_config) nếu có
+            const oldRaw = safeGetStorage('vietqr_config');
+            if (oldRaw) {
+                const oldCfg = JSON.parse(oldRaw);
+                if (oldCfg && oldCfg.accountNo) {
+                    const migrated = [{
+                        id: 'QR_' + Date.now(),
+                        bankBin: oldCfg.bankBin || '970436',
+                        bankShort: getBankShortName(oldCfg.bankBin || '970436'),
+                        accountNo: oldCfg.accountNo,
+                        accountName: oldCfg.accountName || ''
+                    }];
+                    safeSetStorage('vietqr_accounts', JSON.stringify(migrated));
+                    return migrated;
+                }
+            }
+        } catch {}
+        return [];
+    };
+
+    const saveVietQRAccounts = (list) => {
+        VIETQR_ACCOUNTS_CACHE = list;
+        safeSetStorage('vietqr_accounts', JSON.stringify(list));
+        triggerAutoCloudSync();
+        populateOrderQrSelect();
+        renderVietQRAccountsTable();
+    };
+
+    const populateQrBankOptions = () => {
+        const sel = document.getElementById('qrBankBin');
+        if (!sel || sel.options.length > 0) return;
+        sel.innerHTML = VN_BANKS.map(b => `<option value="${escHtml(b.bin)}">${escHtml(b.name)} (${escHtml(b.bin)})</option>`).join('');
+    };
+
+    const populateOrderQrSelect = (selectedId = null) => {
+        const sel = document.getElementById('orderQrAccount');
+        if (!sel) return;
+        const cur = selectedId !== null ? selectedId : sel.value;
+        const accounts = getVietQRAccounts();
+        sel.innerHTML = '<option value="">-- Không hiển thị mã QR trên PXK --</option>' +
+            accounts.map(a => `<option value="${escHtml(a.id)}" ${a.id === cur ? 'selected' : ''}>${escHtml(a.bankShort || getBankShortName(a.bankBin))} - ${escHtml(a.accountNo)}${a.accountName ? ' (' + escHtml(a.accountName) + ')' : ''}</option>`).join('');
+    };
+
+    const renderVietQRAccountsTable = () => {
+        const accounts = getVietQRAccounts();
+        const countEl = document.getElementById('qrAccountCount');
+        if (countEl) countEl.textContent = accounts.length;
+        const tbody = document.querySelector('#qrAccountsTable tbody');
+        if (!tbody) return;
+        tbody.innerHTML = accounts.length > 0 ? accounts.map(a => `
+            <tr>
+                <td><b>${escHtml(a.bankShort || getBankShortName(a.bankBin))}</b> <small style="color:#64748b;">(${escHtml(a.bankBin)})</small></td>
+                <td style="font-weight:700; color:var(--primary-color);">${escHtml(a.accountNo)}</td>
+                <td>${escHtml(a.accountName || '-')}</td>
+                <td class="text-center"><button type="button" class="btn btn-danger btn-sm" onclick="deleteVietQRAccount('${escHtml(a.id)}')">X</button></td>
+            </tr>`).join('')
+            : '<tr><td colspan="4" class="text-center" style="color:#94a3b8; padding:14px;">Chưa có tài khoản ngân hàng nào được lưu.</td></tr>';
     };
 
     const openVietQRModal = () => {
-        const cfg = getVietQRConfig();
-        document.getElementById('qrEnabled').checked = !!cfg.enabled;
-        document.getElementById('qrBankBin').value = cfg.bankBin || '970436';
-        document.getElementById('qrAccountNo').value = cfg.accountNo || '';
-        document.getElementById('qrAccountName').value = cfg.accountName || '';
+        populateQrBankOptions();
+        renderVietQRAccountsTable();
         document.getElementById('vietQRModal').style.display = 'block';
     };
 
-    const saveVietQRConfig = () => {
-        const cfg = {
-            enabled: document.getElementById('qrEnabled').checked,
-            bankBin: document.getElementById('qrBankBin').value,
-            accountNo: document.getElementById('qrAccountNo').value.trim(),
-            accountName: document.getElementById('qrAccountName').value.trim().toUpperCase()
-        };
-        if (cfg.enabled && !cfg.accountNo) {
+    const addVietQRAccount = () => {
+        const bankBin = document.getElementById('qrBankBin').value;
+        const accountNo = document.getElementById('qrAccountNo').value.trim();
+        const accountName = document.getElementById('qrAccountName').value.trim().toUpperCase();
+        if (!accountNo) {
             showToast('Vui lòng nhập Số tài khoản ngân hàng!', 'warning');
             return;
         }
-        safeSetStorage('vietqr_config', JSON.stringify(cfg));
-        triggerAutoCloudSync();
-        closeModal('vietQRModal');
+        const accounts = getVietQRAccounts();
+        if (accounts.some(a => a.bankBin === bankBin && a.accountNo === accountNo)) {
+            showToast('Tài khoản ngân hàng này đã tồn tại trong danh sách!', 'warning');
+            return;
+        }
+        const newAcc = {
+            id: 'QR_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+            bankBin,
+            bankShort: getBankShortName(bankBin),
+            accountNo,
+            accountName
+        };
+        accounts.push(newAcc);
+        saveVietQRAccounts(accounts);
+        document.getElementById('qrAccountNo').value = '';
+        document.getElementById('qrAccountName').value = '';
+        showToast(`Đã lưu tài khoản ${newAcc.bankShort} - ${newAcc.accountNo}!`, 'success');
+    };
+
+    const deleteVietQRAccount = async (accId) => {
+        const ok = await showConfirm('Xóa tài khoản ngân hàng này khỏi danh sách QR?', 'Xóa tài khoản ngân hàng');
+        if (!ok) return;
+        const accounts = getVietQRAccounts().filter(a => a.id !== accId);
+        saveVietQRAccounts(accounts);
         updateInvoicePreview();
-        showToast('Đã lưu cấu hình VietQR!', 'success');
+        showToast('Đã xóa tài khoản ngân hàng!', 'info');
     };
 
     // =========================================================================
@@ -1623,7 +1802,7 @@
         });
         payload['company_name'] = safeGetStorage('company_name') || '';
         payload['company_address'] = safeGetStorage('company_address') || '';
-        payload['vietqr_config'] = safeGetStorage('vietqr_config') || '';
+        payload['vietqr_accounts'] = safeGetStorage('vietqr_accounts') || '';
         payload['db_updated_at'] = safeGetStorage('db_updated_at') || new Date().toISOString();
         return payload;
     };
@@ -1683,7 +1862,8 @@
 
         if (cloudData.company_name) safeSetStorage('company_name', cloudData.company_name);
         if (cloudData.company_address) safeSetStorage('company_address', cloudData.company_address);
-        if (cloudData.vietqr_config) safeSetStorage('vietqr_config', cloudData.vietqr_config);
+        if (cloudData.vietqr_accounts) safeSetStorage('vietqr_accounts', cloudData.vietqr_accounts);
+        else if (cloudData.vietqr_config) safeSetStorage('vietqr_config', cloudData.vietqr_config);
         if (cloudUpdated > localUpdated && cloudData.db_updated_at) {
             safeSetStorage('db_updated_at', cloudData.db_updated_at);
         }
@@ -1885,8 +2065,9 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         try {
-            currentDraftOrderId = generateID();
             const todayStr = getTodayStr();
+            currentDraftOrderId = generateID();
+            currentDraftQrMemo = generateQrTransferMemo(todayStr);
             ['cfDate', 'orderDate', 'importDate', 'filterStart', 'filterEnd', 'sdDate', 'sdLumpDate'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.value = todayStr;
@@ -1938,12 +2119,12 @@
         if (!ok) return;
         const savedUrl = safeGetStorage('cfg_google_script_url');
         const savedPin = safeGetStorage('cfg_google_script_pin');
-        const savedQr = safeGetStorage('vietqr_config');
+        const savedQrAccounts = safeGetStorage('vietqr_accounts');
         try { localStorage.clear(); } catch {}
         invalidateCache();
         if (savedUrl) safeSetStorage('cfg_google_script_url', savedUrl);
         if (savedPin) safeSetStorage('cfg_google_script_pin', savedPin);
-        if (savedQr) safeSetStorage('vietqr_config', savedQr);
+        if (savedQrAccounts) safeSetStorage('vietqr_accounts', savedQrAccounts);
         location.reload();
     };
 
@@ -1959,6 +2140,7 @@
         try {
             if (tabId === 'tab-sales') {
                 populateStaffSelect();
+                populateOrderQrSelect();
                 updateProductDatalist('productListSales');
                 updateCustomerDatalists();
                 refreshSalesRowSuppliers();
@@ -2837,13 +3019,17 @@
         document.getElementById('invTotal').textContent = formatCurrency(grandTotal);
         document.getElementById('invTotalText').textContent = docSoThanhChu(grandTotal);
 
-        // Render VietQR nếu đã bật
+        // Đồng bộ lời nhắn chuyển khoản 11 ký tự theo ngày đơn hàng
+        const qrMemo = syncDraftQrMemoWithDate(inputDate || getTodayStr());
+
+        // Render VietQR theo tài khoản ngân hàng đã chọn cho đơn (không chọn thì không hiện QR, không in lời nhắn chuyển khoản lên PXK)
         const qrBox = document.getElementById('invQrContainer');
-        const qrCfg = getVietQRConfig();
-        if (qrCfg.enabled && qrCfg.accountNo && grandTotal > 0) {
-            const qrUrl = `https://img.vietqr.io/image/${encodeURIComponent(qrCfg.bankBin)}-${encodeURIComponent(qrCfg.accountNo)}-compact2.png?amount=${Math.round(grandTotal)}&addInfo=${encodeURIComponent(id)}&accountName=${encodeURIComponent(qrCfg.accountName || '')}`;
+        const selectedQrId = document.getElementById('orderQrAccount')?.value || '';
+        const selectedAcc = selectedQrId ? getVietQRAccounts().find(a => a.id === selectedQrId) : null;
+        if (selectedAcc && selectedAcc.accountNo && grandTotal > 0) {
+            const qrUrl = `https://img.vietqr.io/image/${encodeURIComponent(selectedAcc.bankBin)}-${encodeURIComponent(selectedAcc.accountNo)}-compact2.png?amount=${Math.round(grandTotal)}&addInfo=${encodeURIComponent(qrMemo)}&accountName=${encodeURIComponent(selectedAcc.accountName || '')}`;
             qrBox.style.display = 'block';
-            qrBox.innerHTML = `<img src="${qrUrl}" alt="VietQR" onerror="this.style.display='none'"><div><b>Quét QR chuyển khoản</b><br>${escHtml(qrCfg.accountNo)}<br>${escHtml(qrCfg.accountName)}</div>`;
+            qrBox.innerHTML = `<img src="${qrUrl}" alt="VietQR" onerror="this.style.display='none'"><div><b>${escHtml(selectedAcc.bankShort || getBankShortName(selectedAcc.bankBin))}</b><br>${escHtml(selectedAcc.accountNo)}${selectedAcc.accountName ? '<br>' + escHtml(selectedAcc.accountName) : ''}</div>`;
         } else {
             qrBox.style.display = 'none';
             qrBox.innerHTML = '';
@@ -2906,6 +3092,8 @@
             note: document.getElementById('orderNote').value.trim(),
             internalNote: document.getElementById('internalNote').value.trim(),
             internalExpense,
+            qrTransferMemo: syncDraftQrMemoWithDate(orderDateVal),
+            qrAccountId: document.getElementById('orderQrAccount')?.value || '',
             totalAmount: totalRev + ship,
             cost: totalCost,
             payments: [],
@@ -2973,6 +3161,8 @@
         const o = loadData(KEYS.ORDERS).find(x => x.id === id);
         if (!o) return;
         editingOrderId = id;
+        const editDateStr = o.date ? new Date(o.date).toISOString().slice(0, 10) : getTodayStr();
+        currentDraftQrMemo = o.qrTransferMemo || generateQrTransferMemo(editDateStr);
         switchTab('tab-sales');
         document.getElementById('editModeBanner').style.display = 'block';
         document.getElementById('editingOrderIDText').textContent = id;
@@ -2990,6 +3180,7 @@
         document.getElementById('internalNote').value = o.internalNote || '';
         document.getElementById('internalExpense').value = formatNumberRaw(o.internalExpense || 0);
         document.getElementById('saleStaffSelect').value = o.staff || '';
+        populateOrderQrSelect(o.qrAccountId || '');
         document.getElementById('orderItemsBody').innerHTML = '';
         o.items.forEach(i => createOrderItemRow(i.name, i.quantity, i.price, i.unit || 'Cái', i.supplier || ''));
         if (o.date) document.getElementById('orderDate').value = new Date(o.date).toISOString().slice(0, 10);
@@ -3004,6 +3195,7 @@
     const cancelEditOrder = () => {
         editingOrderId = null;
         currentDraftOrderId = generateID();
+        currentDraftQrMemo = generateQrTransferMemo(getTodayStr());
         document.getElementById('editModeBanner').style.display = 'none';
         document.getElementById('btnSaveOrder').textContent = '✅ LƯU ĐƠN HÀNG';
         document.getElementById('btnSaveOrder').classList.replace('btn-warning', 'btn-primary');
@@ -3013,6 +3205,7 @@
         document.getElementById('custAddress').value = '';
         document.getElementById('orderStatus').value = 'Mới tạo';
         document.getElementById('orderDelivery').value = '';
+        populateOrderQrSelect('');
         document.getElementById('shippingCost').value = '0';
         document.getElementById('orderNote').value = '';
         document.getElementById('internalNote').value = '';
