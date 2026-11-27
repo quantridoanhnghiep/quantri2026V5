@@ -105,6 +105,7 @@
             justify-content: space-between; gap: 8px; flex-wrap: wrap;
         }
         .sales-layout { display: grid; grid-template-columns: 44% 54%; gap: 2%; align-items: start; }
+        .report-main-layout { display: grid; grid-template-columns: 28% 70%; gap: 2%; align-items: start; }
         .expense-layout { display: grid; grid-template-columns: 38% 60%; gap: 2%; align-items: start; }
         .inventory-layout { display: grid; grid-template-columns: 38% 60%; gap: 2%; align-items: start; }
         .crm-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; min-height: calc(100vh - 220px); }
@@ -363,7 +364,7 @@
 
         /* RESPONSIVE */
         @media (max-width: 1100px) {
-            .sales-layout, .expense-layout, .inventory-layout { grid-template-columns: 1fr; }
+            .sales-layout, .report-main-layout, .expense-layout, .inventory-layout { grid-template-columns: 1fr; }
             .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
             .crm-layout { grid-template-columns: 1fr; }
             .crm-sidebar { border-right: none; border-bottom: 1px solid var(--border-color); max-height: 360px; padding-right: 0; padding-bottom: 12px; }
@@ -1086,8 +1087,8 @@
             </div>
         </div>
 
-        <div class="sales-layout">
-            <div class="card">
+        <div class="report-main-layout">
+            <div class="card" style="padding: 14px;">
                 <div class="card-title">📊 Bảng Cân Đối Tài Chính</div>
                 <div style="margin-bottom:10px;">
                     <span>Tỷ suất LN gộp: <strong id="profitMargin">0%</strong></span>
@@ -1120,7 +1121,7 @@
                     </div>
                 </div>
                 <div class="table-wrap" style="max-height: 430px; overflow-y:auto;">
-                    <table id="rptOrdersTable" style="min-width: 780px;">
+                    <table id="rptOrdersTable" style="min-width: 700px; font-size: 12.5px;">
                         <thead style="position: sticky; top: 0;">
                             <tr><th>Khách hàng</th><th>Mã / Trạng thái</th><th>Ngày</th><th>Ghi chú / Giao vận</th><th class="text-right">Doanh thu</th><th class="text-right">Vốn</th><th class="text-right">Chi phí</th><th class="text-right">Lãi thực</th><th class="text-center">Thao tác</th></tr>
                         </thead>
@@ -3229,6 +3230,7 @@
         saveData(KEYS.CUSTOMERS, customers);
         saveData(KEYS.STOCK, stockData);
         saveData(KEYS.ORDERS, orders);
+        reconcileStockWithOrders(true);
         renderCustGlobalDashboard();
         cancelEditOrder();
     };
@@ -3368,6 +3370,7 @@
 
         saveData(KEYS.STOCK, stock);
         saveData(KEYS.ORDERS, orders);
+        reconcileStockWithOrders(true);
         closeModal('returnOrderModal');
         renderCustGlobalDashboard();
         if (document.getElementById('tab-customers').classList.contains('active')) reRenderCurrentCustomer();
@@ -3775,14 +3778,57 @@
             <td style="padding:4px;" class="text-center"><button type="button" class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">x</button></td>`;
     };
 
-    // Nạp tự động các mặt hàng tồn âm (Xuất trước - Nhập sau) vào bảng nhập kho
+    // Đối soát tồn kho thực tế từ các đơn PXK còn hiệu lực:
+    // - Xóa hẳn sản phẩm mới (chưa từng nhập kho) nếu đơn PXK đã bị hủy/xóa/trả hết
+    // - Giảm đúng số lượng đã bán (quantityOut) cho sản phẩm cũ đã có trong kho
+    const reconcileStockWithOrders = (persist = true) => {
+        const orders = loadData(KEYS.ORDERS);
+        let stock = loadData(KEYS.STOCK);
+        const soldMap = {};
+
+        orders.forEach(o => {
+            if (o.status === 'Đã trả hàng') return;
+            (o.items || []).forEach(i => {
+                const k = normalizeStr(i.name);
+                if (!k) return;
+                soldMap[k] = (soldMap[k] || 0) + (parseFloat(i.quantity) || 0);
+            });
+        });
+
+        let changed = false;
+        const cleanedStock = [];
+        stock.forEach(s => {
+            const k = normalizeStr(s.name);
+            const actualOut = soldMap[k] || 0;
+            if (s.quantityOut !== actualOut) {
+                s.quantityOut = actualOut;
+                changed = true;
+            }
+            const hasImportHistory = Array.isArray(s.history) && s.history.length > 0;
+            // Nếu là sản phẩm mới tạo từ đơn "Bán trước khi nhập" (chưa nhập kho) và nay không còn đơn PXK nào -> xóa khỏi kho
+            if ((parseFloat(s.quantityIn) || 0) <= 0 && actualOut <= 0 && !hasImportHistory) {
+                changed = true;
+                return;
+            }
+            cleanedStock.push(s);
+        });
+
+        if (changed && persist) {
+            saveData(KEYS.STOCK, cleanedStock);
+        }
+        return cleanedStock;
+    };
+
+    // Nạp tự động CHỈ các mặt hàng tồn âm thực sự phát sinh từ đơn PXK còn hiệu lực
     const fillNegativeStockToImport = () => {
-        const stock = loadData(KEYS.STOCK);
+        const stock = reconcileStockWithOrders(true);
         const selSup = document.getElementById('stockSupplier').value;
-        let negatives = stock.filter(s => (s.quantityIn - s.quantityOut) < 0);
+        let negatives = stock.filter(s => (s.quantityIn - s.quantityOut) < 0 && s.quantityOut > 0);
         if (selSup) negatives = negatives.filter(s => s.supplier === selSup);
+
         if (negatives.length === 0) {
-            showToast(selSup ? `Không có hàng tồn âm nào thuộc NCC "${selSup}".` : 'Hiện không có mặt hàng nào bị tồn âm!', 'info');
+            renderInventory();
+            showToast(selSup ? `Không có hàng tồn âm phát sinh từ PXK thuộc NCC "${selSup}".` : 'Hiện không có mặt hàng nào bị tồn âm từ các đơn PXK!', 'info');
             return;
         }
         document.getElementById('stockEntryBody').innerHTML = '';
@@ -3790,87 +3836,167 @@
             const needQty = Math.abs(s.quantityIn - s.quantityOut);
             createStockRow(s.name, needQty, s.costPrice > 0 ? formatNumberRaw(s.costPrice) : '');
         });
-        showToast(`Đã nạp ${negatives.length} mặt hàng tồn âm. Hãy nhập giá vốn và bấm NHẬP KHO!`, 'success');
+        renderInventory();
+        showToast(`Đã đối soát PXK & nạp ${negatives.length} mặt hàng tồn âm. Hãy kiểm tra giá vốn rồi bấm NHẬP KHO!`, 'success', 4000);
     };
 
-    const submitStockEntry = () => {
+    let isSubmittingStock = false;
+
+    const submitStockEntry = async () => {
+        if (isSubmittingStock) return;
         const supplier = document.getElementById('stockSupplier').value;
         const rows = document.querySelectorAll('#stockEntryBody tr');
-        let stock = loadData(KEYS.STOCK);
-        let orders = loadData(KEYS.ORDERS);
-        let unbilled = loadData(KEYS.UNBILLED_IMPORTS);
-        let backfillCount = 0;
         const impDate = document.getElementById('importDate').value || getTodayStr();
-        let logItems = [], logTotal = 0;
 
-        rows.forEach((row, idx) => {
+        // 1. Thu thập & kiểm tra trùng dòng ngay trong form nhập
+        const rawEntries = [];
+        const dupInForm = new Set();
+        const seenInForm = new Set();
+        rows.forEach(row => {
             const name = row.querySelector('.stock-name').value.trim();
             const qty = parseFloat(row.querySelector('.stock-qty').value);
             const price = parseInput(row.querySelector('.stock-price').value);
             if (!name || isNaN(qty) || qty <= 0) return;
-
-            logItems.push({ name, qty, price, total: qty * price });
-            logTotal += (qty * price);
-
-            let exist = stock.find(s => normalizeStr(s.name) === normalizeStr(name));
-            let newAvgPrice = price;
-
-            if (exist) {
-                const currentQty = Math.max(0, exist.quantityIn - exist.quantityOut);
-                const currentVal = currentQty * (exist.costPrice || 0);
-                newAvgPrice = (currentVal + qty * price) / (currentQty + qty);
-                if (!exist.history) exist.history = [{ date: 'Trị giá cũ', qty: exist.quantityIn, price: exist.costPrice, supplier: exist.supplier || '' }];
-                exist.history.push({ date: impDate, qty, price, supplier: supplier || '' });
-                exist.quantityIn += qty;
-                exist.costPrice = Math.round(newAvgPrice);
-                if (supplier) exist.supplier = supplier;
-            } else {
-                stock.push({
-                    name, quantityIn: qty, quantityOut: 0, costPrice: price || 0, supplier, note: '',
-                    history: [{ date: impDate, qty, price, supplier: supplier || '' }]
-                });
-            }
-
-            unbilled.push({
-                id: 'IMP_' + Date.now() + '_' + idx,
-                date: impDate,
-                supplier: supplier || 'Chưa chọn NCC',
-                name, qty, price, total: qty * price
-            });
-
-            // Backfill giá vốn cho đơn bán trước khi nhập (costPrice === 0)
-            orders.forEach(o => {
-                let orderModified = false;
-                let newOrderCost = 0;
-                o.items.forEach(i => {
-                    if (normalizeStr(i.name) === normalizeStr(name) && (!i.costPrice || i.costPrice === 0)) {
-                        i.costPrice = Math.round(newAvgPrice);
-                        orderModified = true;
-                        backfillCount++;
-                    }
-                    newOrderCost += (i.quantity * (i.costPrice || 0));
-                });
-                if (orderModified) o.cost = newOrderCost;
-            });
+            const k = normalizeStr(name);
+            if (seenInForm.has(k)) dupInForm.add(name);
+            seenInForm.add(k);
+            rawEntries.push({ name, qty, price });
         });
 
-        if (logItems.length === 0) { showToast('Vui lòng nhập ít nhất 1 sản phẩm hợp lệ!', 'warning'); return; }
+        if (rawEntries.length === 0) {
+            showToast('Vui lòng nhập ít nhất 1 sản phẩm hợp lệ!', 'warning');
+            return;
+        }
 
-        let logs = loadData(KEYS.IMPORT_LOGS);
-        if (!logs || logs.length === 0) logs = generateImportLogsFromStock();
-        logs.push({ id: 'IMP_LOG_' + Date.now(), date: impDate, supplier: supplier || 'Chưa chọn NCC', items: logItems, totalAmount: logTotal, supplierCode: '' });
-        saveData(KEYS.IMPORT_LOGS, logs);
-        saveData(KEYS.STOCK, stock);
-        saveData(KEYS.UNBILLED_IMPORTS, unbilled);
-        if (backfillCount > 0) saveData(KEYS.ORDERS, orders);
+        if (dupInForm.size > 0) {
+            showToast(`Đang có sản phẩm bị lặp 2 dòng trong bảng nhập: ${Array.from(dupInForm).join(', ')}. Hãy xóa dòng trùng trước khi lưu!`, 'error', 5000);
+            return;
+        }
 
-        renderInventory();
-        updateProductDatalist('productListStock');
-        document.getElementById('stockEntryBody').innerHTML = '';
-        createStockRow();
-        showToast(backfillCount > 0
-            ? `Nhập kho xong! Đã tự cập nhật giá vốn cho ${backfillCount} dòng hàng bán trước.`
-            : 'Nhập kho thành công! Dữ liệu đã chuyển sang tab Tiền NCC.', 'success', 4000);
+        // 2. Cảnh báo nếu chưa chọn NCC (tránh thất lạc khi chốt công nợ NCC)
+        if (!supplier) {
+            const okNoSup = await showConfirm(
+                'Bạn chưa chọn Nhà Cung Cấp!\nNếu nhập mà không chọn NCC, các mặt hàng này sẽ ghi là \"Chưa chọn NCC\" và không hiện khi chọn NCC bên tab Tiền NCC.\n\nBạn vẫn muốn nhập kho không?',
+                'Chưa chọn Nhà Cung Cấp'
+            );
+            if (!okNoSup) return;
+        }
+
+        // 3. Cảnh báo nếu có sản phẩm chưa điền giá vốn (0 đ -> công nợ NCC = 0 đ)
+        const zeroPriceItems = rawEntries.filter(e => !e.price || e.price <= 0);
+        if (zeroPriceItems.length > 0) {
+            const okZero = await showConfirm(
+                `Có ${zeroPriceItems.length} sản phẩm đang có Giá vốn = 0 ₫ (${zeroPriceItems.map(x => x.name).join(', ')}).\nTiền phải trả NCC cho các mã này sẽ bằng 0 ₫.\n\nBạn vẫn muốn tiếp tục?`,
+                'Cảnh báo Giá vốn bằng 0'
+            );
+            if (!okZero) return;
+        }
+
+        // 4. Cảnh báo CHỐNG NHẬP TRÙNG CÙNG 1 NGÀY (kiểm tra cả UNBILLED_IMPORTS & IMPORT_LOGS)
+        const existingLogs = loadData(KEYS.IMPORT_LOGS);
+        const existingUnbilled = loadData(KEYS.UNBILLED_IMPORTS);
+        const dupSameDay = [];
+        rawEntries.forEach(entry => {
+            const k = normalizeStr(entry.name);
+            const matchUnbilled = existingUnbilled.find(u =>
+                String(u.date || '').slice(0, 10) === impDate &&
+                normalizeStr(u.name) === k &&
+                (!supplier || u.supplier === supplier)
+            );
+            const matchLog = !matchUnbilled && existingLogs.find(l =>
+                String(l.date || '').slice(0, 10) === impDate &&
+                (!supplier || l.supplier === supplier) &&
+                (l.items || []).some(it => normalizeStr(it.name) === k)
+            );
+            if (matchUnbilled) {
+                dupSameDay.push(`• ${entry.name} (đã nhập SL: ${matchUnbilled.qty}, giá ${formatCurrency(matchUnbilled.price)} ngày ${formatDateVN(impDate)})`);
+            } else if (matchLog) {
+                const it = matchLog.items.find(x => normalizeStr(x.name) === k);
+                dupSameDay.push(`• ${entry.name} (đã nhập SL: ${it?.qty || ''}, giá ${formatCurrency(it?.price || 0)} ngày ${formatDateVN(impDate)})`);
+            }
+        });
+
+        if (dupSameDay.length > 0) {
+            const okDup = await showConfirm(
+                `⚠️ CẢNH BÁO TRÙNG NHẬP KHO TRONG NGÀY (${formatDateVN(impDate)}):\n\n${dupSameDay.join('\n')}\n\nNếu bạn đã nhập các mã này rồi, bấm \"Hủy\" để tránh cộng dồn sai tiền nợ NCC. Chỉ bấm \"Đồng ý\" nếu thực sự có đợt nhập thứ 2 trong ngày.`,
+                'Phát hiện sản phẩm đã nhập hôm nay'
+            );
+            if (!okDup) return;
+        }
+
+        isSubmittingStock = true;
+        try {
+            let stock = reconcileStockWithOrders(false);
+            let orders = loadData(KEYS.ORDERS);
+            let unbilled = loadData(KEYS.UNBILLED_IMPORTS);
+            let backfillCount = 0;
+            let logItems = [], logTotal = 0;
+
+            rawEntries.forEach((entry, idx) => {
+                const { name, qty, price } = entry;
+                logItems.push({ name, qty, price, total: qty * price });
+                logTotal += (qty * price);
+
+                let exist = stock.find(s => normalizeStr(s.name) === normalizeStr(name));
+                let newAvgPrice = price;
+
+                if (exist) {
+                    const currentQty = Math.max(0, exist.quantityIn - exist.quantityOut);
+                    const currentVal = currentQty * (exist.costPrice || 0);
+                    newAvgPrice = (currentVal + qty * price) / (currentQty + qty);
+                    if (!exist.history) exist.history = [{ date: 'Trị giá cũ', qty: exist.quantityIn, price: exist.costPrice, supplier: exist.supplier || '' }];
+                    exist.history.push({ date: impDate, qty, price, supplier: supplier || '' });
+                    exist.quantityIn += qty;
+                    exist.costPrice = Math.round(newAvgPrice);
+                    if (supplier) exist.supplier = supplier;
+                } else {
+                    stock.push({
+                        name, quantityIn: qty, quantityOut: 0, costPrice: price || 0, supplier, note: '',
+                        history: [{ date: impDate, qty, price, supplier: supplier || '' }]
+                    });
+                }
+
+                unbilled.push({
+                    id: 'IMP_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).slice(2, 6),
+                    date: impDate,
+                    supplier: supplier || 'Chưa chọn NCC',
+                    name, qty, price, total: qty * price
+                });
+
+                // Backfill giá vốn cho đơn bán trước khi nhập (costPrice === 0)
+                orders.forEach(o => {
+                    let orderModified = false;
+                    let newOrderCost = 0;
+                    o.items.forEach(i => {
+                        if (normalizeStr(i.name) === normalizeStr(name) && (!i.costPrice || i.costPrice === 0)) {
+                            i.costPrice = Math.round(newAvgPrice);
+                            orderModified = true;
+                            backfillCount++;
+                        }
+                        newOrderCost += (i.quantity * (i.costPrice || 0));
+                    });
+                    if (orderModified) o.cost = newOrderCost;
+                });
+            });
+
+            let logs = loadData(KEYS.IMPORT_LOGS);
+            if (!logs || logs.length === 0) logs = generateImportLogsFromStock();
+            logs.push({ id: 'IMP_LOG_' + Date.now(), date: impDate, supplier: supplier || 'Chưa chọn NCC', items: logItems, totalAmount: logTotal, supplierCode: '' });
+            saveData(KEYS.IMPORT_LOGS, logs);
+            saveData(KEYS.STOCK, stock);
+            saveData(KEYS.UNBILLED_IMPORTS, unbilled);
+            if (backfillCount > 0) saveData(KEYS.ORDERS, orders);
+
+            renderInventory();
+            updateProductDatalist('productListStock');
+            document.getElementById('stockEntryBody').innerHTML = '';
+            createStockRow();
+            showToast(backfillCount > 0
+                ? `Nhập kho xong! Đã tự cập nhật giá vốn cho ${backfillCount} dòng hàng bán trước.`
+                : 'Nhập kho thành công! Dữ liệu đã chuyển sang tab Tiền NCC.', 'success', 4000);
+        } finally {
+            isSubmittingStock = false;
+        }
     };
 
     const syncWithGoogleSheets = async (btn) => {
@@ -4034,7 +4160,13 @@
         saveData(KEYS.IMPORT_LOGS, logs.filter(l => l.items && l.items.length > 0));
 
         let debts = loadData(KEYS.SUPPLIER_DEBTS);
-        debts.forEach(d => { if (d.items) { d.items = d.items.filter(i => normalizeStr(i.name) !== keyName); d.payable = d.items.reduce((s, i) => s + i.total, 0); } });
+        debts.forEach(d => {
+            if (d.items) {
+                d.items = d.items.filter(i => normalizeStr(i.name) !== keyName);
+                d.payable = d.items.reduce((s, i) => s + i.total, 0);
+                if (d.items.length === 0) (d.payments || []).forEach(p => deleteLinkedCashflow(p.id));
+            }
+        });
         saveData(KEYS.SUPPLIER_DEBTS, debts.filter(d => d.items && d.items.length > 0));
 
         let orders = loadData(KEYS.ORDERS);
@@ -4137,6 +4269,92 @@
                 if (count > 0) { saveData(KEYS.ORDERS, orders); showToast(`Đã tính lại giá vốn cho ${count} đơn hàng!`, 'success'); }
             }
         }
+        if (field === 'quantityIn' && oldValue !== newValue) {
+            const diff = newValue - oldValue;
+            const prodName = stock[index].name;
+            const normName = normalizeStr(prodName);
+
+            // Đồng bộ số lượng sang UNBILLED_IMPORTS
+            let unbilled = loadData(KEYS.UNBILLED_IMPORTS);
+            let rem = diff;
+            if (rem < 0) {
+                for (let i = unbilled.length - 1; i >= 0 && rem < 0; i--) {
+                    if (normalizeStr(unbilled[i].name) === normName) {
+                        const take = Math.min(unbilled[i].qty, Math.abs(rem));
+                        unbilled[i].qty -= take;
+                        rem += take;
+                        unbilled[i].total = unbilled[i].qty * unbilled[i].price;
+                    }
+                }
+                unbilled = unbilled.filter(u => u.qty > 0);
+            } else {
+                const target = [...unbilled].reverse().find(u => normalizeStr(u.name) === normName);
+                if (target) {
+                    target.qty += rem;
+                    target.total = target.qty * target.price;
+                }
+            }
+            saveData(KEYS.UNBILLED_IMPORTS, unbilled);
+
+            // Đồng bộ số lượng sang IMPORT_LOGS
+            let logs = loadData(KEYS.IMPORT_LOGS);
+            rem = diff;
+            if (rem < 0) {
+                for (let i = logs.length - 1; i >= 0 && rem < 0; i--) {
+                    const it = (logs[i].items || []).find(x => normalizeStr(x.name) === normName);
+                    if (it) {
+                        const take = Math.min(it.qty, Math.abs(rem));
+                        it.qty -= take;
+                        rem += take;
+                        it.total = it.qty * it.price;
+                        logs[i].items = logs[i].items.filter(x => x.qty > 0);
+                        logs[i].totalAmount = logs[i].items.reduce((acc, x) => acc + x.total, 0);
+                    }
+                }
+                logs = logs.filter(l => l.items && l.items.length > 0);
+            } else {
+                for (let i = logs.length - 1; i >= 0; i--) {
+                    const it = (logs[i].items || []).find(x => normalizeStr(x.name) === normName);
+                    if (it) {
+                        it.qty += rem;
+                        it.total = it.qty * it.price;
+                        logs[i].totalAmount = logs[i].items.reduce((acc, x) => acc + x.total, 0);
+                        break;
+                    }
+                }
+            }
+            saveData(KEYS.IMPORT_LOGS, logs);
+
+            // Đồng bộ số lượng sang SUPPLIER_DEBTS để không lệch tiền phải trả NCC
+            let debts = loadData(KEYS.SUPPLIER_DEBTS);
+            rem = diff;
+            if (rem < 0) {
+                for (let i = debts.length - 1; i >= 0 && rem < 0; i--) {
+                    const it = (debts[i].items || []).find(x => normalizeStr(x.name) === normName);
+                    if (it) {
+                        const take = Math.min(it.qty, Math.abs(rem));
+                        it.qty -= take;
+                        rem += take;
+                        it.total = it.qty * it.price;
+                        debts[i].items = debts[i].items.filter(x => x.qty > 0);
+                        debts[i].payable = debts[i].items.reduce((acc, x) => acc + x.total, 0);
+                    }
+                }
+            } else {
+                for (let i = debts.length - 1; i >= 0; i--) {
+                    const it = (debts[i].items || []).find(x => normalizeStr(x.name) === normName);
+                    if (it) {
+                        it.qty += rem;
+                        it.total = it.qty * it.price;
+                        debts[i].payable = debts[i].items.reduce((acc, x) => acc + x.total, 0);
+                        break;
+                    }
+                }
+            }
+            saveData(KEYS.SUPPLIER_DEBTS, debts);
+            showToast('Đã đồng bộ số lượng nhập mới sang lịch sử nhập & công nợ NCC!', 'info', 2500);
+        }
+
         renderInventory();
         updateProductDatalist('productListStock');
     };
@@ -4350,7 +4568,12 @@
         if (idx === -1) return;
         const item = debts[idx];
         let unbilled = loadData(KEYS.UNBILLED_IMPORTS);
-        (item.items || []).forEach(it => unbilled.push({ id: it.id || ('RESTORE_' + Date.now() + Math.random()), date: item.date, supplier: item.supplier, name: it.name, qty: it.qty, price: it.price, total: it.total }));
+        (item.items || []).forEach(it => {
+            const restoreId = it.id || ('RESTORE_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+            if (!unbilled.some(u => u.id === restoreId)) {
+                unbilled.push({ id: restoreId, date: it.date || item.date, supplier: item.supplier, name: it.name, qty: it.qty, price: it.price, total: it.total });
+            }
+        });
         (item.payments || []).forEach(p => deleteLinkedCashflow(p.id));
         saveData(KEYS.UNBILLED_IMPORTS, unbilled);
         debts.splice(idx, 1);
@@ -4969,15 +5192,11 @@
         let stock = loadData(KEYS.STOCK);
         const o = orders.find(x => x.id === id);
         if (o) {
-            o.items.forEach(i => {
-                const p = stock.find(s => normalizeStr(s.name) === normalizeStr(i.name));
-                if (p) p.quantityOut = Math.max(0, p.quantityOut - i.quantity);
-            });
             (o.payments || []).forEach(p => deleteLinkedCashflow(p.id));
         }
         orders = orders.filter(x => x.id !== id);
-        saveData(KEYS.STOCK, stock);
         saveData(KEYS.ORDERS, orders);
+        reconcileStockWithOrders(true);
         renderCustGlobalDashboard();
         filterReports(currentReportPeriod);
         showToast(`Đã xóa đơn hàng ${id}!`, 'info');
