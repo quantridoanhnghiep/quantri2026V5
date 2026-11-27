@@ -1759,10 +1759,21 @@
     };
 
     // =========================================================================
-    // 4. CLOUD SYNC THÔNG MINH (SMART MERGE + POLLING + POST SECURITY)
+    // 4. CLOUD SYNC ĐA MÁY (TƯƠNG THÍCH GOOGLE APPS SCRIPT doGet / doPost)
     // =========================================================================
-    const getCloudUrl = () => (safeGetStorage('cfg_google_script_url') || '').trim();
-    const getCloudPin = () => safeGetStorage('cfg_google_script_pin') || '';
+    const DEFAULT_SECRET_PIN = '123456';
+    let CLOUD_URL_CACHE = null;
+    let CLOUD_PIN_CACHE = null;
+
+    const getCloudUrl = () => {
+        if (CLOUD_URL_CACHE !== null) return CLOUD_URL_CACHE;
+        return (safeGetStorage('cfg_google_script_url') || '').trim();
+    };
+    const getCloudPin = () => {
+        if (CLOUD_PIN_CACHE !== null) return CLOUD_PIN_CACHE;
+        const saved = safeGetStorage('cfg_google_script_pin');
+        return saved !== null ? saved : DEFAULT_SECRET_PIN;
+    };
     const isAutoPollEnabled = () => safeGetStorage('cfg_cloud_auto_poll') !== 'false';
 
     const updateCloudBadge = (state, text) => {
@@ -1779,13 +1790,22 @@
         document.getElementById('cloudConfigModal').style.display = 'block';
     };
 
+    const hasAnyLocalData = () => {
+        return Object.values(KEYS).some(k => loadData(k).length > 0);
+    };
+
     const saveCloudConfig = async () => {
         const url = document.getElementById('cfgScriptUrl').value.trim();
-        const pin = document.getElementById('cfgSecretPin').value.trim();
+        const pinInput = document.getElementById('cfgSecretPin').value.trim();
+        const pin = pinInput !== '' ? pinInput : DEFAULT_SECRET_PIN;
         const autoPoll = document.getElementById('cfgAutoPoll').checked;
+
+        CLOUD_URL_CACHE = url;
+        CLOUD_PIN_CACHE = pin;
         safeSetStorage('cfg_google_script_url', url);
         safeSetStorage('cfg_google_script_pin', pin);
         safeSetStorage('cfg_cloud_auto_poll', autoPoll ? 'true' : 'false');
+
         closeModal('cloudConfigModal');
         setupCloudPolling();
         if (url) {
@@ -1802,7 +1822,7 @@
         });
         payload['company_name'] = safeGetStorage('company_name') || '';
         payload['company_address'] = safeGetStorage('company_address') || '';
-        payload['vietqr_accounts'] = safeGetStorage('vietqr_accounts') || '';
+        payload['vietqr_accounts'] = JSON.stringify(getVietQRAccounts());
         payload['db_updated_at'] = safeGetStorage('db_updated_at') || new Date().toISOString();
         return payload;
     };
@@ -1825,7 +1845,7 @@
         return Array.from(map.values());
     };
 
-    const mergeCloudPayload = (cloudData) => {
+    const mergeCloudPayload = (cloudData, forceCloudPriority = false) => {
         const localUpdated = new Date(safeGetStorage('db_updated_at') || 0).getTime();
         const cloudUpdated = new Date(cloudData.db_updated_at || 0).getTime();
 
@@ -1845,13 +1865,14 @@
 
         let mergedAny = false;
         Object.values(KEYS).forEach(k => {
-            if (!cloudData[k]) return;
+            if (cloudData[k] === undefined || cloudData[k] === null || cloudData[k] === '') return;
             try {
                 const cloudArr = typeof cloudData[k] === 'string' ? JSON.parse(cloudData[k]) : cloudData[k];
                 if (!Array.isArray(cloudArr)) return;
                 const localArr = loadData(k);
-                // Nếu máy hiện tại có thay đổi mới hơn chưa đẩy, gộp 2 bên; ngược lại ưu tiên Cloud mới hơn
-                const finalArr = (localUpdated > cloudUpdated && localArr.length > 0)
+                // Nếu máy hiện tại đang có dữ liệu chưa đẩy mới hơn Cloud (và không phải kéo ép), gộp 2 bên để không mất dữ liệu
+                const shouldMerge = !forceCloudPriority && localArr.length > 0 && localUpdated > cloudUpdated;
+                const finalArr = shouldMerge
                     ? mergeArrayByKey(localArr, cloudArr, keyExtractors[k])
                     : cloudArr;
                 DB_CACHE[k] = finalArr;
@@ -1862,9 +1883,27 @@
 
         if (cloudData.company_name) safeSetStorage('company_name', cloudData.company_name);
         if (cloudData.company_address) safeSetStorage('company_address', cloudData.company_address);
-        if (cloudData.vietqr_accounts) safeSetStorage('vietqr_accounts', cloudData.vietqr_accounts);
-        else if (cloudData.vietqr_config) safeSetStorage('vietqr_config', cloudData.vietqr_config);
-        if (cloudUpdated > localUpdated && cloudData.db_updated_at) {
+
+        // Đồng bộ danh sách tài khoản VietQR và cập nhật trực tiếp vào cache
+        if (cloudData.vietqr_accounts) {
+            try {
+                const parsedQr = typeof cloudData.vietqr_accounts === 'string'
+                    ? JSON.parse(cloudData.vietqr_accounts)
+                    : cloudData.vietqr_accounts;
+                if (Array.isArray(parsedQr)) {
+                    VIETQR_ACCOUNTS_CACHE = parsedQr;
+                    safeSetStorage('vietqr_accounts', JSON.stringify(parsedQr));
+                }
+            } catch {}
+        } else if (cloudData.vietqr_config) {
+            const cfgStr = typeof cloudData.vietqr_config === 'string'
+                ? cloudData.vietqr_config
+                : JSON.stringify(cloudData.vietqr_config);
+            safeSetStorage('vietqr_config', cfgStr);
+            VIETQR_ACCOUNTS_CACHE = null;
+        }
+
+        if (cloudData.db_updated_at && (forceCloudPriority || cloudUpdated >= localUpdated || !localUpdated)) {
             safeSetStorage('db_updated_at', cloudData.db_updated_at);
         }
         return mergedAny;
@@ -1874,36 +1913,39 @@
         const url = getCloudUrl();
         if (!url) {
             if (isManual) showToast('Vui lòng nhập Link Google Apps Script Web App trước!', 'warning');
-            return;
+            return false;
         }
         try {
             isSyncingCloud = true;
             updateCloudBadge('syncing', '⏳ Đang lưu lên Google...');
             const response = await fetch(url, {
                 method: 'POST',
+                redirect: 'follow',
                 keepalive: useKeepalive,
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
-                    action: 'save_db',
                     pin: getCloudPin(),
                     data: collectAllAppData()
                 })
             });
             const res = await response.json();
             isSyncingCloud = false;
-            if (res.status === 'success') {
+            if (res && res.status === 'success') {
                 hasPendingCloudChanges = false;
                 const timeStr = new Date().toLocaleTimeString('vi-VN');
                 updateCloudBadge('synced', `☁️ Đã lưu (${timeStr})`);
                 if (isManual) showToast('Đã đồng bộ dữ liệu lên Google Drive thành công!', 'success');
+                return true;
             } else {
                 updateCloudBadge('error', '⚠️ Lỗi lưu Cloud');
-                if (isManual) showToast('Lỗi Google Cloud: ' + (res.message || 'Không xác định'), 'error');
+                if (isManual) showToast('Lỗi Google Cloud: ' + ((res && res.message) || 'Sai mã PIN hoặc lỗi Script'), 'error', 4500);
+                return false;
             }
-        } catch {
+        } catch (err) {
             isSyncingCloud = false;
             updateCloudBadge('error', '⚠️ Mất kết nối Cloud');
-            if (isManual) showToast('Không thể kết nối Google Cloud. Dữ liệu vẫn an toàn trên máy.', 'warning');
+            if (isManual) showToast('Không thể đẩy dữ liệu lên Google Cloud. Kiểm tra lại Link Web App hoặc quyền truy cập "Anyone".', 'warning', 4500);
+            return false;
         }
     };
 
@@ -1911,59 +1953,78 @@
         const url = getCloudUrl();
         if (!url) {
             updateCloudBadge('', '☁️ Chưa kết nối Google');
-            return;
+            return false;
         }
-        if (isSyncingCloud || hasPendingCloudChanges) {
-            if (!isManual) return;
+        if (!isManual && (isSyncingCloud || hasPendingCloudChanges)) {
+            return false;
         }
         try {
             if (isManual) updateCloudBadge('syncing', '⏳ Đang tải từ Google...');
-            // Ưu tiên POST để không lộ PIN trên URL; fallback GET nếu Apps Script bản cũ
-            let res = null;
-            try {
-                const postResp = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action: 'load_db', pin: getCloudPin() })
-                });
-                res = await postResp.json();
-            } catch {
-                res = null;
-            }
-            if (!res || (!res.data && res.status !== 'empty' && res.status !== 'error')) {
-                const fetchUrl = `${url}?action=load_db&pin=${encodeURIComponent(getCloudPin())}&t=${Date.now()}`;
-                const getResp = await fetch(fetchUrl);
-                res = await getResp.json();
-            }
+            // LUÔN dùng GET ?action=load_db&pin=... đúng chuẩn doGet(e) của Google Apps Script (tuyệt đối không gửi POST khi tải về)
+            const sep = url.includes('?') ? '&' : '?';
+            const fetchUrl = `${url}${sep}action=load_db&pin=${encodeURIComponent(getCloudPin())}&t=${Date.now()}`;
+            const getResp = await fetch(fetchUrl, {
+                method: 'GET',
+                redirect: 'follow',
+                cache: 'no-store'
+            });
+            const res = await getResp.json();
 
-            if (res.status === 'success' && res.data) {
+            // Hỗ trợ cả định dạng chuẩn { status: 'success', data: {...} } lẫn trường hợp Script trả trực tiếp object data
+            const cloudData = (res && res.status === 'success' && res.data)
+                ? res.data
+                : (res && (res[KEYS.ORDERS] !== undefined || res[KEYS.STOCK] !== undefined) ? res : null);
+
+            if (cloudData) {
                 const prevUpdated = safeGetStorage('db_updated_at') || '';
-                const incomingUpdated = res.data.db_updated_at || '';
-                if (!isManual && prevUpdated && incomingUpdated && prevUpdated === incomingUpdated) {
-                    return; // Không có thay đổi mới
+                const incomingUpdated = cloudData.db_updated_at || '';
+                const localEmpty = !hasAnyLocalData();
+                if (!isManual && !localEmpty && prevUpdated && incomingUpdated && prevUpdated === incomingUpdated) {
+                    const timeStr = new Date().toLocaleTimeString('vi-VN');
+                    updateCloudBadge('synced', `☁️ Đã đồng bộ (${timeStr})`);
+                    return true;
                 }
-                mergeCloudPayload(res.data);
+
+                mergeCloudPayload(cloudData, localEmpty);
 
                 const savedName = safeGetStorage('company_name');
                 const savedAddress = safeGetStorage('company_address');
                 if (savedName) document.getElementById('invCompanyName').innerText = savedName;
                 if (savedAddress) document.getElementById('invCompanyAddress').innerText = savedAddress;
 
+                populateOrderQrSelect();
+                renderCustGlobalDashboard();
+
                 const activeTab = document.querySelector('.tab-pane.active')?.id || 'tab-sales';
                 switchTab(activeTab, true);
 
                 const timeStr = new Date().toLocaleTimeString('vi-VN');
                 updateCloudBadge('synced', `☁️ Đã đồng bộ (${timeStr})`);
-                if (isManual) showToast('Đã tải & gộp dữ liệu mới nhất từ Google Drive!', 'success');
-            } else if (res.status === 'empty') {
-                await pushDataToCloud(false);
+
+                if (isManual) {
+                    const nOrders = loadData(KEYS.ORDERS).length;
+                    const nCusts = loadData(KEYS.CUSTOMERS).length;
+                    const nStock = loadData(KEYS.STOCK).length;
+                    showToast(`Đã tải từ Google Drive: ${nOrders} đơn hàng, ${nCusts} khách hàng, ${nStock} sản phẩm!`, 'success', 4000);
+                }
+                return true;
+            } else if (res && res.status === 'empty') {
+                if (hasAnyLocalData()) {
+                    await pushDataToCloud(isManual);
+                } else {
+                    updateCloudBadge('synced', '☁️ Đã kết nối (Chưa có dữ liệu)');
+                    if (isManual) showToast('Đã kết nối Google Cloud thành công (chưa có dữ liệu trên Drive).', 'info');
+                }
+                return true;
             } else {
                 updateCloudBadge('error', '⚠️ Sai PIN / Lỗi Cloud');
-                if (isManual) showToast('Lỗi tải dữ liệu: ' + (res.message || 'Không xác định'), 'error');
+                if (isManual) showToast('Lỗi tải dữ liệu: ' + ((res && res.message) || 'Kiểm tra lại Mã PIN hoặc Link Web App'), 'error', 4500);
+                return false;
             }
-        } catch {
-            updateCloudBadge('error', '⚠️ Offline (Local)');
-            if (isManual) showToast('Không thể kết nối Google Cloud. Kiểm tra lại Link Web App hoặc mạng.', 'warning');
+        } catch (err) {
+            updateCloudBadge('error', '⚠️ Lỗi kết nối Cloud');
+            if (isManual) showToast('Không thể tải dữ liệu từ Google Cloud. Kiểm tra Link Web App (phải kết thúc bằng /exec) và chế độ chia sẻ Anyone.', 'warning', 5000);
+            return false;
         }
     };
 
@@ -1986,6 +2047,13 @@
             }, 15000);
         }
     };
+
+    // Tự động kéo dữ liệu mới ngay khi chuyển sang cửa sổ / tab trình duyệt trên máy 2
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && getCloudUrl() && isAutoPollEnabled() && !hasPendingCloudChanges && !isSyncingCloud) {
+            pullDataFromCloud(false);
+        }
+    });
 
     window.addEventListener('beforeunload', (e) => {
         if (hasPendingCloudChanges || isSyncingCloud) {
