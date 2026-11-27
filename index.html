@@ -977,16 +977,24 @@
                     </div>
 
                     <div>
-                        <label class="form-label" style="color: var(--danger-color);">Các Mã Hàng Nhập (Chưa tạo công nợ):</label>
-                        <div class="table-wrap">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:6px;">
+                            <label class="form-label" style="color: var(--danger-color); margin:0;">Các Mã Hàng Nhập (Chưa tạo công nợ):</label>
+                            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                                <input type="date" id="sdImportFilterDate" class="form-control" style="width:auto; padding:3px 6px; font-size:11.5px;" title="Lọc theo ngày nhập (để trống = tất cả các ngày)" onchange="updateSdUnbilledBtnCount()">
+                                <button type="button" id="btnLoadAllUnbilled" class="btn btn-purple btn-sm" onclick="loadAllUnbilledForSupplier()" title="Tự động nạp toàn bộ mã SP đã nhập bên Kho Hàng của NCC này">⚡ Nạp tất cả mã SP</button>
+                                <button type="button" class="btn btn-outline btn-sm" onclick="resetSdImportRows()" title="Xóa bớt / làm trống danh sách">🗑️ Làm trống</button>
+                            </div>
+                        </div>
+                        <div class="table-wrap" style="max-height: 280px; overflow-y: auto;">
                             <table style="width: 100%; border: 1px solid var(--border-color);">
-                                <thead>
+                                <thead style="position: sticky; top: 0; z-index: 1;">
                                     <tr>
-                                        <th style="width:42%;">Mã nhập kho</th>
-                                        <th style="width:26%;">Sản phẩm</th>
-                                        <th style="width:10%;">SL</th>
-                                        <th style="width:16%;">Giá nhập</th>
-                                        <th></th>
+                                        <th style="width:34%;">Mã nhập kho (Ngày)</th>
+                                        <th style="width:25%;">Sản phẩm</th>
+                                        <th style="width:9%;" class="text-center">SL</th>
+                                        <th style="width:14%;" class="text-right">Giá nhập</th>
+                                        <th style="width:14%;" class="text-right">Thành tiền</th>
+                                        <th style="width:4%;"></th>
                                     </tr>
                                 </thead>
                                 <tbody id="sdImportBody"></tbody>
@@ -4154,29 +4162,79 @@
         }
     };
 
+    const getFilteredUnbilledForSelectedSupplier = () => {
+        const supplier = document.getElementById('sdSupplierSelect')?.value || '';
+        const filterDate = document.getElementById('sdImportFilterDate')?.value || '';
+        if (!supplier) return [];
+        let list = loadData(KEYS.UNBILLED_IMPORTS).filter(u => u.supplier === supplier);
+        if (filterDate) list = list.filter(u => String(u.date || '').slice(0, 10) === filterDate);
+        list.sort((a, b) => new Date(a.date) - new Date(b.date));
+        return list;
+    };
+
+    const updateSdUnbilledBtnCount = () => {
+        const btn = document.getElementById('btnLoadAllUnbilled');
+        if (!btn) return;
+        const supplier = document.getElementById('sdSupplierSelect')?.value || '';
+        if (!supplier) {
+            btn.textContent = '⚡ Nạp tất cả mã SP';
+            return;
+        }
+        const list = getFilteredUnbilledForSelectedSupplier();
+        btn.textContent = `⚡ Nạp tất cả (${list.length} mã SP)`;
+    };
+
     const resetSdImportRows = () => {
         document.getElementById('sdImportBody').innerHTML = '';
+        updateSdUnbilledBtnCount();
         addSdImportRow();
     };
 
-    const addSdImportRow = () => {
+    // Nạp tự động toàn bộ mã SP đã nhập bên Kho Hàng của NCC đang chọn (theo ngày, mã, giá)
+    const loadAllUnbilledForSupplier = () => {
+        const supplier = document.getElementById('sdSupplierSelect')?.value || '';
+        if (!supplier) {
+            showToast('Vui lòng chọn Nhà Cung Cấp trước!', 'warning');
+            return;
+        }
+        const unbilled = getFilteredUnbilledForSelectedSupplier();
+        if (unbilled.length === 0) {
+            const filterDate = document.getElementById('sdImportFilterDate')?.value || '';
+            showToast(filterDate
+                ? `NCC "${supplier}" không có mã SP nào chưa tạo công nợ trong ngày ${formatDateVN(filterDate)}.`
+                : `NCC "${supplier}" hiện không còn mã SP nào chưa tạo công nợ.`, 'info');
+            return;
+        }
+        document.getElementById('sdImportBody').innerHTML = '';
+        unbilled.forEach(u => addSdImportRow(u.id, unbilled));
+        calcSupplierGrandTotal();
+        const grandTot = unbilled.reduce((sum, u) => sum + (parseFloat(u.total) || 0), 0);
+        showToast(`Đã nạp ${unbilled.length} mã SP của ${supplier} (${formatCurrency(grandTot)}). Có thể bấm X để bỏ bớt dòng!`, 'success', 4000);
+    };
+
+    const addSdImportRow = (preselectId = '', cachedUnbilled = null) => {
         const supplier = document.getElementById('sdSupplierSelect').value;
-        const unbilled = loadData(KEYS.UNBILLED_IMPORTS).filter(u => u.supplier === supplier);
+        const unbilled = cachedUnbilled || loadData(KEYS.UNBILLED_IMPORTS).filter(u => u.supplier === supplier);
         const options = '<option value="">-- Chọn mã hàng nhập --</option>' + unbilled.map(u =>
-            `<option value="${escHtml(u.id)}">${formatDateVN(u.date)} - ${escHtml(u.name)} (SL:${u.qty})</option>`
+            `<option value="${escHtml(u.id)}" ${u.id === preselectId ? 'selected' : ''}>${formatDateVN(u.date)} - ${escHtml(u.name)} (SL:${u.qty})</option>`
         ).join('');
 
         const tbody = document.getElementById('sdImportBody');
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td style="padding:4px;"><select class="form-control sd-import-select" style="font-size:12px;" onchange="updateSdImportRow(this)">${options}</select></td>
-            <td style="padding:4px;"><input type="text" class="form-control sd-import-name" style="font-size:12px;" disabled></td>
-            <td style="padding:4px;"><input type="text" class="form-control sd-import-qty text-center" style="font-size:12px;" disabled></td>
-            <td style="padding:4px;"><input type="text" class="form-control sd-import-price text-right" style="font-size:12px;" disabled></td>
-            <td style="padding:4px;" class="text-center"><button type="button" class="btn btn-danger btn-sm" onclick="removeSdImportRow(this)">X</button></td>
+            <td style="padding:4px;"><select class="form-control sd-import-select" style="font-size:11.5px; padding:4px;" onchange="updateSdImportRow(this)">${options}</select></td>
+            <td style="padding:4px;"><input type="text" class="form-control sd-import-name" style="font-size:11.5px; padding:4px;" disabled></td>
+            <td style="padding:4px;"><input type="text" class="form-control sd-import-qty text-center" style="font-size:11.5px; padding:4px;" disabled></td>
+            <td style="padding:4px;"><input type="text" class="form-control sd-import-price text-right" style="font-size:11.5px; padding:4px;" disabled></td>
+            <td style="padding:4px;"><input type="text" class="form-control sd-import-total text-right" style="font-size:11.5px; padding:4px; font-weight:700; color:var(--danger-color);" disabled></td>
+            <td style="padding:4px;" class="text-center"><button type="button" class="btn btn-danger btn-sm" onclick="removeSdImportRow(this)" title="Bỏ dòng này">X</button></td>
         `;
         tbody.appendChild(tr);
-        calcSupplierGrandTotal();
+        if (preselectId) {
+            updateSdImportRow(tr.querySelector('.sd-import-select'));
+        } else {
+            calcSupplierGrandTotal();
+        }
     };
 
     const removeSdImportRow = (btn) => { btn.closest('tr').remove(); calcSupplierGrandTotal(); };
@@ -4188,11 +4246,13 @@
             tr.querySelector('.sd-import-name').value = item.name;
             tr.querySelector('.sd-import-qty').value = item.qty;
             tr.querySelector('.sd-import-price').value = formatCurrency(item.price);
+            tr.querySelector('.sd-import-total').value = formatCurrency(item.total);
             tr.dataset.total = item.total;
         } else {
             tr.querySelector('.sd-import-name').value = '';
             tr.querySelector('.sd-import-qty').value = '';
             tr.querySelector('.sd-import-price').value = '';
+            tr.querySelector('.sd-import-total').value = '';
             tr.dataset.total = 0;
         }
         calcSupplierGrandTotal();
