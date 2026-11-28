@@ -540,6 +540,14 @@
                         </div>
                     </div>
 
+                    <div id="oldDebtOptionBox" style="margin-top: 10px; padding: 9px 11px; border-radius: 6px; background: #fff7ed; border: 1px solid #fdba74; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:7px; font-weight:700; color:#9a3412; font-size:12.5px; cursor:pointer; margin:0;">
+                            <input type="checkbox" id="includeOldDebtOnInv" onchange="updateInvoicePreview()">
+                            <span>➕ Cộng thêm công nợ cũ chưa trả vào PXK &amp; mã QR</span>
+                        </label>
+                        <span id="custOldDebtHint" style="font-size:12px; font-weight:700; color:#c2410c;">Nợ cũ: 0 ₫</span>
+                    </div>
+
                     <div style="margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap;">
                         <button id="btnSaveOrder" class="btn btn-primary" style="flex: 1; padding: 10px;" onclick="submitOrder()">✅ LƯU ĐƠN HÀNG</button>
                         <button id="btnCancelEdit" class="btn btn-secondary" style="display:none; padding: 10px;" onclick="cancelEditOrder()">❌ Hủy sửa</button>
@@ -588,6 +596,7 @@
                             <table class="inv-total-table">
                                 <tr><td>Cộng tiền hàng:</td><td class="text-right"><span id="invSubTotal">0 ₫</span></td></tr>
                                 <tr><td>Phí Ship / Giảm giá:</td><td class="text-right"><span id="invShip">0 ₫</span></td></tr>
+                                <tr id="invOldDebtRow" style="display:none;"><td style="color:#b45309; font-weight:bold;">(+) Công nợ cũ chưa trả:</td><td class="text-right" style="color:#b45309; font-weight:bold;"><span id="invOldDebt">0 ₫</span></td></tr>
                                 <tr><td class="inv-total-label" style="color:#dc3545;">Tổng thanh toán:</td><td class="inv-total-value"><span id="invTotal">0 ₫</span></td></tr>
                             </table>
                         </div>
@@ -1848,7 +1857,18 @@
             } else {
                 const tLocal = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
                 const tCloud = item.updatedAt ? new Date(item.updatedAt).getTime() : 0;
-                if (tCloud >= tLocal) map.set(k, item);
+                if (tCloud > tLocal) {
+                    map.set(k, item);
+                } else if (tCloud === tLocal) {
+                    // Nếu cùng thời điểm (hoặc bản ghi cũ chưa có updatedAt), ưu tiên bản đã có nhiều đợt nhập kho hơn
+                    const hLocal = Array.isArray(existing.history) ? existing.history.length : 0;
+                    const hCloud = Array.isArray(item.history) ? item.history.length : 0;
+                    const inLocal = parseFloat(existing.quantityIn) || 0;
+                    const inCloud = parseFloat(item.quantityIn) || 0;
+                    if (hCloud > hLocal || (hCloud === hLocal && inCloud > inLocal)) {
+                        map.set(k, item);
+                    }
+                }
             }
         });
         return Array.from(map.values());
@@ -1879,8 +1899,9 @@
                 const cloudArr = typeof cloudData[k] === 'string' ? JSON.parse(cloudData[k]) : cloudData[k];
                 if (!Array.isArray(cloudArr)) return;
                 const localArr = loadData(k);
-                // Nếu máy hiện tại đang có dữ liệu chưa đẩy mới hơn Cloud (và không phải kéo ép), gộp 2 bên để không mất dữ liệu
-                const shouldMerge = !forceCloudPriority && localArr.length > 0 && localUpdated > cloudUpdated;
+                // Luôn gộp thông minh theo từng bản ghi khi máy đã có dữ liệu (trừ khi kéo ép vào máy trắng)
+                // Giúp không bao giờ bị bản Cloud cũ ghi đè mất hàng vừa nhập kho hoặc đơn vừa tạo
+                const shouldMerge = !forceCloudPriority && localArr.length > 0;
                 const finalArr = shouldMerge
                     ? mergeArrayByKey(localArr, cloudArr, keyExtractors[k])
                     : cloudArr;
@@ -3043,6 +3064,24 @@
         if (cleanName) onSalesProductChange(row.querySelector('.item-name'));
     };
 
+    // Tính chính xác công nợ cũ chưa trả của 1 khách hàng (loại trừ đơn đang sửa nếu có)
+    const getCustomerOldUnpaidDebt = (phone, excludeOrderId = null) => {
+        const cleanPhone = String(phone || '').trim();
+        if (!cleanPhone) return 0;
+        const otherOrders = loadData(KEYS.ORDERS).filter(o =>
+            String(o.customer?.phone || '').trim() === cleanPhone &&
+            (!excludeOrderId || o.id !== excludeOrderId)
+        );
+        const totalOrdersVal = otherOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount) || 0), 0);
+        const totalDirectPaid = otherOrders.reduce((sum, o) =>
+            sum + (o.payments ? o.payments.reduce((ps, p) => ps + (parseFloat(p.amount) || 0), 0) : 0), 0
+        );
+        const totalLumpPaid = loadData(KEYS.CUST_PAYMENTS)
+            .filter(p => String(p.phone || '').trim() === cleanPhone)
+            .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        return Math.max(0, totalOrdersVal - totalDirectPaid - totalLumpPaid);
+    };
+
     const updateInvoicePreview = () => {
         if (!currentDraftOrderId) currentDraftOrderId = generateID();
         const id = editingOrderId || currentDraftOrderId;
@@ -3093,8 +3132,25 @@
         document.getElementById('invShip').textContent = formatCurrency(ship);
 
         const grandTotal = subTotal + ship;
-        document.getElementById('invTotal').textContent = formatCurrency(grandTotal);
-        document.getElementById('invTotalText').textContent = docSoThanhChu(grandTotal);
+
+        // Tính công nợ cũ chưa trả của khách hàng (không tính đơn đang sửa để tránh cộng trùng)
+        const curPhone = document.getElementById('custPhone').value.trim();
+        const oldDebt = getCustomerOldUnpaidDebt(curPhone, editingOrderId);
+        const oldDebtHintEl = document.getElementById('custOldDebtHint');
+        if (oldDebtHintEl) {
+            oldDebtHintEl.textContent = oldDebt > 0 ? `Khách đang nợ cũ: ${formatCurrency(oldDebt)}` : 'Nợ cũ: 0 ₫';
+            oldDebtHintEl.style.color = oldDebt > 0 ? '#dc2626' : '#64748b';
+        }
+        const includeOldDebt = !!document.getElementById('includeOldDebtOnInv')?.checked && oldDebt > 0;
+        const oldDebtRowEl = document.getElementById('invOldDebtRow');
+        if (oldDebtRowEl) {
+            oldDebtRowEl.style.display = includeOldDebt ? 'table-row' : 'none';
+            document.getElementById('invOldDebt').textContent = formatCurrency(oldDebt);
+        }
+
+        const payableTotal = includeOldDebt ? (grandTotal + oldDebt) : grandTotal;
+        document.getElementById('invTotal').textContent = formatCurrency(payableTotal);
+        document.getElementById('invTotalText').textContent = docSoThanhChu(payableTotal);
 
         // Đồng bộ lời nhắn chuyển khoản 11 ký tự theo ngày đơn hàng
         const qrMemo = syncDraftQrMemoWithDate(inputDate || getTodayStr());
@@ -3103,8 +3159,8 @@
         const qrBox = document.getElementById('invQrContainer');
         const selectedQrId = document.getElementById('orderQrAccount')?.value || '';
         const selectedAcc = selectedQrId ? getVietQRAccounts().find(a => a.id === selectedQrId) : null;
-        if (selectedAcc && selectedAcc.accountNo && grandTotal > 0) {
-            const qrUrl = `https://img.vietqr.io/image/${encodeURIComponent(selectedAcc.bankBin)}-${encodeURIComponent(selectedAcc.accountNo)}-compact2.png?amount=${Math.round(grandTotal)}&addInfo=${encodeURIComponent(qrMemo)}&accountName=${encodeURIComponent(selectedAcc.accountName || '')}`;
+        if (selectedAcc && selectedAcc.accountNo && payableTotal > 0) {
+            const qrUrl = `https://img.vietqr.io/image/${encodeURIComponent(selectedAcc.bankBin)}-${encodeURIComponent(selectedAcc.accountNo)}-compact2.png?amount=${Math.round(payableTotal)}&addInfo=${encodeURIComponent(qrMemo)}&accountName=${encodeURIComponent(selectedAcc.accountName || '')}`;
             qrBox.style.display = 'block';
             qrBox.innerHTML = `<img src="${qrUrl}" alt="VietQR" onerror="this.style.display='none'"><div><b>${escHtml(selectedAcc.bankShort || getBankShortName(selectedAcc.bankBin))}</b><br>${escHtml(selectedAcc.accountNo)}${selectedAcc.accountName ? '<br>' + escHtml(selectedAcc.accountName) : ''}</div>`;
         } else {
@@ -3171,6 +3227,8 @@
             internalExpense,
             qrTransferMemo: syncDraftQrMemoWithDate(orderDateVal),
             qrAccountId: document.getElementById('orderQrAccount')?.value || '',
+            includeOldDebt: !!document.getElementById('includeOldDebtOnInv')?.checked,
+            oldDebtSnapshot: document.getElementById('includeOldDebtOnInv')?.checked ? getCustomerOldUnpaidDebt(custPhone, editingOrderId) : 0,
             totalAmount: totalRev + ship,
             cost: totalCost,
             payments: [],
@@ -3259,6 +3317,7 @@
         document.getElementById('internalExpense').value = formatNumberRaw(o.internalExpense || 0);
         document.getElementById('saleStaffSelect').value = o.staff || '';
         populateOrderQrSelect(o.qrAccountId || '');
+        const oldDebtChk = document.getElementById('includeOldDebtOnInv'); if (oldDebtChk) oldDebtChk.checked = !!o.includeOldDebt;
         document.getElementById('orderItemsBody').innerHTML = '';
         o.items.forEach(i => createOrderItemRow(i.name, i.quantity, i.price, i.unit || 'Cái', i.supplier || ''));
         if (o.date) document.getElementById('orderDate').value = new Date(o.date).toISOString().slice(0, 10);
@@ -3284,6 +3343,7 @@
         document.getElementById('orderStatus').value = 'Mới tạo';
         document.getElementById('orderDelivery').value = '';
         populateOrderQrSelect('');
+        const oldDebtChk = document.getElementById('includeOldDebtOnInv'); if (oldDebtChk) oldDebtChk.checked = false;
         document.getElementById('shippingCost').value = '0';
         document.getElementById('orderNote').value = '';
         document.getElementById('internalNote').value = '';
@@ -3949,10 +4009,12 @@
                     exist.quantityIn += qty;
                     exist.costPrice = Math.round(newAvgPrice);
                     if (supplier) exist.supplier = supplier;
+                    exist.updatedAt = new Date().toISOString();
                 } else {
                     stock.push({
                         name, quantityIn: qty, quantityOut: 0, costPrice: price || 0, supplier, note: '',
-                        history: [{ date: impDate, qty, price, supplier: supplier || '' }]
+                        history: [{ date: impDate, qty, price, supplier: supplier || '' }],
+                        updatedAt: new Date().toISOString()
                     });
                 }
 
@@ -3986,6 +4048,11 @@
             saveData(KEYS.STOCK, stock);
             saveData(KEYS.UNBILLED_IMPORTS, unbilled);
             if (backfillCount > 0) saveData(KEYS.ORDERS, orders);
+            // Đẩy ngay lên Google Cloud để các máy khác nhận tồn kho mới tức thì (không bị kéo bản cũ làm âm lại)
+            if (getCloudUrl()) {
+                if (cloudSyncTimeout) clearTimeout(cloudSyncTimeout);
+                pushDataToCloud(false);
+            }
 
             renderInventory();
             updateProductDatalist('productListStock');
@@ -4018,10 +4085,20 @@
             const impDate = document.getElementById('importDate').value || getTodayStr();
             let syncLogs = {};
 
+            const existingSheetLogs = loadData(KEYS.IMPORT_LOGS);
+            let skippedDup = 0;
             data.forEach((item, idx) => {
                 if (item.name && item.qty > 0) {
                     const importQty = parseFloat(item.qty);
                     const importPrice = parseFloat(item.cost) || 0;
+                    const supKey = item.supplier || 'Google Sheets';
+                    // Chống đồng bộ trùng các dòng đã nhập cùng ngày/SP/SL/giá/NCC
+                    const alreadySynced = existingSheetLogs.some(l =>
+                        String(l.date || '').slice(0, 10) === impDate &&
+                        l.supplier === supKey &&
+                        (l.items || []).some(it => normalizeStr(it.name) === normalizeStr(item.name) && it.qty === importQty && it.price === importPrice)
+                    );
+                    if (alreadySynced) { skippedDup++; return; }
                     let exist = stock.find(s => normalizeStr(s.name) === normalizeStr(item.name));
                     if (exist) {
                         const curQty = Math.max(0, exist.quantityIn - exist.quantityOut);
@@ -4057,7 +4134,7 @@
             saveData(KEYS.UNBILLED_IMPORTS, unbilled);
             renderInventory();
             updateProductDatalist('productListStock');
-            showToast(`Đã đồng bộ ${count} dòng nhập kho từ Sheet!`, 'success');
+            showToast(skippedDup > 0 ? `Đã đồng bộ ${count} dòng mới (bỏ qua ${skippedDup} dòng đã nhập trùng)!` : `Đã đồng bộ ${count} dòng nhập kho từ Sheet!`, 'success');
         } catch {
             showToast('Lỗi kết nối tới Google Sheets!', 'error');
         } finally {
@@ -4195,6 +4272,7 @@
         if (field === 'costPrice') newValue = parseInput(value);
 
         stock[index][field] = newValue;
+        stock[index].updatedAt = new Date().toISOString();
         if (field === 'costPrice' && stock[index].history) {
             stock[index].history.forEach(h => h.price = newValue);
         } else if (field === 'quantityIn' && stock[index].history && stock[index].history.length > 0) {
